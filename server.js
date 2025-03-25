@@ -57,12 +57,18 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('userJoined', username);
   });
 
-  socket.on('sendSignal', ({ targetUsername, signal }) => {
-    // Пересылаем сигнал целевому пользователю
-    socket.to(socket.roomId).emit('receiveSignal', {
-      senderId: socket.username,
-      signal: signal
-    });
+  // В обработчике sendSignal
+socket.on('sendSignal', ({ targetUsername, signal }) => {
+    // Находим сокет целевого пользователя
+    const targetSocket = Array.from(io.sockets.sockets.values())
+      .find(s => s.username === targetUsername && s.roomId === socket.roomId);
+    
+    if (targetSocket) {
+      targetSocket.emit('receiveSignal', {
+        senderId: socket.username,
+        signal: signal
+      });
+    }
   });
 
   socket.on('disconnect', () => {
