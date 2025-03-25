@@ -6,11 +6,8 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 
-// CORS настройки
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST']
-}));
+app.use(cors());
+app.use(express.json());
 
 const io = new Server(server, {
   cors: {
@@ -19,54 +16,37 @@ const io = new Server(server, {
   }
 });
 
-// Хранилище комнат
 const rooms = new Map();
 
-// Обработка подключений Socket.IO
 io.on('connection', (socket) => {
   console.log(`New connection: ${socket.id}`);
 
-  socket.on('joinRoom', async ({ roomId, username }) => {
+  socket.on('joinRoom', ({ roomId, username }) => {
     if (!username) {
-      socket.emit('error', 'Username cannot be empty');
-      return;
+      return socket.emit('error', 'Username is required');
     }
 
-    // Сохраняем username в socket
     socket.username = username;
     socket.roomId = roomId;
+    socket.join(roomId);
 
-    // Входим в комнату
-    await socket.join(roomId);
-
-    // Инициализируем комнату если её нет
     if (!rooms.has(roomId)) {
       rooms.set(roomId, new Set());
     }
 
-    // Получаем текущих пользователей
-    const roomUsers = Array.from(rooms.get(roomId));
-    
-    // Добавляем нового пользователя
+    const users = Array.from(rooms.get(roomId));
     rooms.get(roomId).add(username);
 
-    // Отправляем текущих пользователей новому клиенту
-    socket.emit('usersInRoom', roomUsers);
-
-    // Оповещаем остальных о новом пользователе
+    socket.emit('usersInRoom', users);
     socket.to(roomId).emit('userJoined', username);
   });
 
-  // В обработчике sendSignal
-socket.on('sendSignal', ({ targetUsername, signal }) => {
-    // Находим сокет целевого пользователя
-    const targetSocket = Array.from(io.sockets.sockets.values())
-      .find(s => s.username === targetUsername && s.roomId === socket.roomId);
-    
+  socket.on('sendSignal', ({ targetUsername, signal }) => {
+    const targetSocket = findSocketByUsername(targetUsername);
     if (targetSocket) {
       targetSocket.emit('receiveSignal', {
         senderId: socket.username,
-        signal: signal
+        signal
       });
     }
   });
@@ -76,17 +56,16 @@ socket.on('sendSignal', ({ targetUsername, signal }) => {
       rooms.get(socket.roomId).delete(socket.username);
       socket.to(socket.roomId).emit('userLeft', socket.username);
     }
-    console.log(`Disconnected: ${socket.id}`);
   });
+
+  function findSocketByUsername(username) {
+    return Array.from(io.sockets.sockets.values())
+      .find(s => s.username === username && s.roomId === socket.roomId);
+  }
 });
 
-// Health check endpoints
-app.get('/', (req, res) => {
-  res.send('WebRTC Server is running');
-});
-
-app.get('/ping', (req, res) => {
-  res.json({ status: 'OK', port: process.env.PORT || 8080 });
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', users: Array.from(rooms.values()).flatMap(set => Array.from(set)) });
 });
 
 const PORT = process.env.PORT || 8080;
