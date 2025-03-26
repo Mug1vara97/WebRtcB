@@ -18,9 +18,8 @@ const io = new Server(server, {
   pingInterval: 10000
 });
 
-// Оптимизация соединения
 io.engine.on("connection", (socket) => {
-  socket.setNoDelay(true); // Отключаем алгоритм Нейгла
+  socket.setNoDelay(true);
 });
 
 const rooms = new Map();
@@ -33,7 +32,6 @@ io.on('connection', (socket) => {
       return socket.emit('error', 'Username is required');
     }
 
-    // Проверка уникальности имени
     if (!rooms.has(roomId)) {
       rooms.set(roomId, new Set());
     } else if (rooms.get(roomId).has(username)) {
@@ -45,7 +43,7 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     rooms.get(roomId).add(username);
 
-    // Отправляем список пользователей без текущего
+    // Отправляем список существующих пользователей новому участнику
     const others = Array.from(rooms.get(roomId)).filter(u => u !== username);
     socket.emit('usersInRoom', others);
 
