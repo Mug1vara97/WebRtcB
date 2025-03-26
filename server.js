@@ -52,12 +52,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('sendSignal', ({ targetUsername, signal }) => {
-    const targetSocket = findSocketByUsername(targetUsername);
+    const targetSocket = Array.from(io.sockets.sockets.values())
+      .find(s => s.username === targetUsername && s.roomId === socket.roomId);
+    
     if (targetSocket) {
       targetSocket.emit('receiveSignal', {
         senderId: socket.username,
         signal
       });
+    } else {
+      console.log(`Target user ${targetUsername} not found`);
     }
   });
 
@@ -67,11 +71,6 @@ io.on('connection', (socket) => {
       socket.to(socket.roomId).emit('userLeft', socket.username);
     }
   });
-
-  function findSocketByUsername(username) {
-    return Array.from(io.sockets.sockets.values())
-      .find(s => s.username === username && s.roomId === socket.roomId);
-  }
 });
 
 app.get('/health', (req, res) => {
