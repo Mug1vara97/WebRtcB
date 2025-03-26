@@ -17,43 +17,30 @@ const io = new Server(server, {
   }
 });
 
-// Middleware для оптимизации
-io.use((socket, next) => {
-  socket.setNoDelay(true); // Отключаем алгоритм Нейгла
-  next();
-});
-
 const rooms = new Map();
 
 io.on('connection', (socket) => {
   console.log(`New connection: ${socket.id}`);
 
-  // Обработчик подключения к комнате
-socket.on('joinRoom', ({ roomId, username }) => {
-  if (!username) return socket.emit('error', 'Username is required');
+  socket.on('joinRoom', ({ roomId, username }) => {
+    if (!username) {
+      return socket.emit('error', 'Username is required');
+    }
 
-  // Проверка уникальности имени в комнате
-  if (!rooms.has(roomId)) {
-    rooms.set(roomId, new Set());
-  }
+    socket.username = username;
+    socket.roomId = roomId;
+    socket.join(roomId);
 
-  const roomUsers = rooms.get(roomId);
-  if (roomUsers.has(username)) {
-    return socket.emit('error', 'Username is already taken');
-  }
+    if (!rooms.has(roomId)) {
+      rooms.set(roomId, new Set());
+    }
 
-  roomUsers.add(username);
-  socket.username = username;
-  socket.roomId = roomId;
-  socket.join(roomId);
+    const users = Array.from(rooms.get(roomId));
+    rooms.get(roomId).add(username);
 
-  // Отправляем список пользователей без текущего
-  const others = Array.from(roomUsers).filter(u => u !== username);
-  socket.emit('usersInRoom', others);
-
-  // Уведомляем других о новом пользователе
-  socket.to(roomId).emit('userJoined', username);
-});
+    socket.emit('usersInRoom', users);
+    socket.to(roomId).emit('userJoined', username);
+  });
 
   socket.on('sendSignal', ({ targetUsername, signal }) => {
     const targetSocket = findSocketByUsername(targetUsername);
