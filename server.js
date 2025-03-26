@@ -28,25 +28,32 @@ const rooms = new Map();
 io.on('connection', (socket) => {
   console.log(`New connection: ${socket.id}`);
 
-  socket.on('joinRoom', ({ roomId, username }) => {
-    if (!username) {
-      return socket.emit('error', 'Username is required');
-    }
+  // Обработчик подключения к комнате
+socket.on('joinRoom', ({ roomId, username }) => {
+  if (!username) return socket.emit('error', 'Username is required');
 
-    socket.username = username;
-    socket.roomId = roomId;
-    socket.join(roomId);
+  // Проверка уникальности имени в комнате
+  if (!rooms.has(roomId)) {
+    rooms.set(roomId, new Set());
+  }
 
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Set());
-    }
+  const roomUsers = rooms.get(roomId);
+  if (roomUsers.has(username)) {
+    return socket.emit('error', 'Username is already taken');
+  }
 
-    const users = Array.from(rooms.get(roomId));
-    rooms.get(roomId).add(username);
+  roomUsers.add(username);
+  socket.username = username;
+  socket.roomId = roomId;
+  socket.join(roomId);
 
-    socket.emit('usersInRoom', users);
-    socket.to(roomId).emit('userJoined', username);
-  });
+  // Отправляем список пользователей без текущего
+  const others = Array.from(roomUsers).filter(u => u !== username);
+  socket.emit('usersInRoom', others);
+
+  // Уведомляем других о новом пользователе
+  socket.to(roomId).emit('userJoined', username);
+});
 
   socket.on('sendSignal', ({ targetUsername, signal }) => {
     const targetSocket = findSocketByUsername(targetUsername);
