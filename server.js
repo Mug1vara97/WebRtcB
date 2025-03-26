@@ -15,7 +15,11 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   },
   pingTimeout: 5000,
-  pingInterval: 10000
+  pingInterval: 10000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 30000,
+    skipMiddlewares: true
+  }
 });
 
 io.engine.on("connection", (socket) => {
@@ -27,48 +31,56 @@ const rooms = new Map();
 io.on('connection', (socket) => {
   console.log(`New connection: ${socket.id}`);
 
-  socket.on('joinRoom', ({ roomId, username }) => {
-    if (!username) {
-      return socket.emit('error', 'Username is required');
+  socket.on('joinRoom', ({ roomId, username }, callback) => {
+    try {
+      if (!username) throw new Error('Username is required');
+
+      if (!rooms.has(roomId)) {
+        rooms.set(roomId, new Map());
+      }
+
+      const roomUsers = rooms.get(roomId);
+      
+      if (Array.from(roomUsers.values()).includes(username)) {
+        throw new Error('Username is already taken');
+      }
+
+      roomUsers.set(socket.id, username);
+      socket.username = username;
+      socket.roomId = roomId;
+      socket.join(roomId);
+
+      const others = Array.from(roomUsers.values()).filter(u => u !== username);
+      callback({ success: true, users: others });
+
+      socket.to(roomId).emit('userJoined', username);
+    } catch (err) {
+      callback({ success: false, error: err.message });
     }
-
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Map());
-    }
-
-    const roomUsers = rooms.get(roomId);
-    
-    if (Array.from(roomUsers.values()).includes(username)) {
-      return socket.emit('error', 'Username is already taken');
-    }
-
-    roomUsers.set(socket.id, username);
-    socket.username = username;
-    socket.roomId = roomId;
-    socket.join(roomId);
-
-    const others = Array.from(roomUsers.values()).filter(u => u !== username);
-    socket.emit('usersInRoom', others);
-
-    socket.to(roomId).emit('userJoined', username);
   });
 
-  socket.on('sendSignal', ({ targetUsername, signal }) => {
-    const roomUsers = rooms.get(socket.roomId);
-    if (!roomUsers) return;
+  socket.on('sendSignal', ({ targetUsername, signal }, callback) => {
+    try {
+      const roomUsers = rooms.get(socket.roomId);
+      if (!roomUsers) throw new Error('Room not found');
 
-    const targetSocketId = Array.from(roomUsers.entries())
-      .find(([id, name]) => name === targetUsername)?.[0];
-    
-    if (targetSocketId) {
+      const targetSocketId = Array.from(roomUsers.entries())
+        .find(([id, name]) => name === targetUsername)?.[0];
+      
+      if (!targetSocketId) throw new Error('User not found');
+
       io.to(targetSocketId).emit('receiveSignal', {
         senderId: socket.username,
         signal
       });
+      callback({ success: true });
+    } catch (err) {
+      callback({ success: false, error: err.message });
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    console.log(`Disconnected: ${socket.id} (${reason})`);
     if (socket.roomId && socket.username && rooms.has(socket.roomId)) {
       const roomUsers = rooms.get(socket.roomId);
       const username = roomUsers.get(socket.id);
@@ -80,6 +92,10 @@ io.on('connection', (socket) => {
         socket.to(socket.roomId).emit('userLeft', username);
       }
     }
+  });
+
+  socket.on('reconnect_attempt', () => {
+    console.log(`Reconnect attempt: ${socket.id}`);
   });
 });
 
