@@ -45,13 +45,16 @@ io.on('connection', (socket) => {
 
     // Отправляем список существующих пользователей новому участнику
     const others = Array.from(rooms.get(roomId)).filter(u => u !== username);
+    console.log(`Sending users list to ${username}:`, others);
     socket.emit('usersInRoom', others);
 
     // Уведомляем других о новом пользователе
+    console.log(`Notifying room ${roomId} about new user ${username}`);
     socket.to(roomId).emit('userJoined', username);
   });
 
   socket.on('sendSignal', ({ targetUsername, signal }) => {
+    console.log(`Routing signal from ${socket.username} to ${targetUsername}`);
     const targetSocket = Array.from(io.sockets.sockets.values())
       .find(s => s.username === targetUsername && s.roomId === socket.roomId);
     
@@ -61,7 +64,7 @@ io.on('connection', (socket) => {
         signal
       });
     } else {
-      console.log(`Target user ${targetUsername} not found`);
+      console.log(`Target user ${targetUsername} not found in room ${socket.roomId}`);
     }
   });
 
