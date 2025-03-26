@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -14,7 +13,14 @@ const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  pingTimeout: 5000,
+  pingInterval: 10000
+});
+
+// Оптимизация соединения
+io.engine.on("connection", (socket) => {
+  socket.setNoDelay(true); // Отключаем алгоритм Нейгла
 });
 
 const rooms = new Map();
@@ -27,18 +33,23 @@ io.on('connection', (socket) => {
       return socket.emit('error', 'Username is required');
     }
 
+    // Проверка уникальности имени
+    if (!rooms.has(roomId)) {
+      rooms.set(roomId, new Set());
+    } else if (rooms.get(roomId).has(username)) {
+      return socket.emit('error', 'Username is already taken');
+    }
+
     socket.username = username;
     socket.roomId = roomId;
     socket.join(roomId);
-
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Set());
-    }
-
-    const users = Array.from(rooms.get(roomId));
     rooms.get(roomId).add(username);
 
-    socket.emit('usersInRoom', users);
+    // Отправляем список пользователей без текущего
+    const others = Array.from(rooms.get(roomId)).filter(u => u !== username);
+    socket.emit('usersInRoom', others);
+
+    // Уведомляем других о новом пользователе
     socket.to(roomId).emit('userJoined', username);
   });
 
@@ -66,7 +77,11 @@ io.on('connection', (socket) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', users: Array.from(rooms.values()).flatMap(set => Array.from(set)) });
+  res.json({ 
+    status: 'OK', 
+    rooms: Array.from(rooms.keys()),
+    users: Array.from(rooms.values()).flatMap(set => Array.from(set)) 
+  });
 });
 
 const PORT = process.env.PORT || 8080;
