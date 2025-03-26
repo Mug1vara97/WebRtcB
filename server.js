@@ -33,45 +33,58 @@ io.on('connection', (socket) => {
     }
 
     if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Set());
-    } else if (rooms.get(roomId).has(username)) {
+      rooms.set(roomId, new Map()); // Теперь храним Map с пользователями и их socket.id
+    }
+
+    const roomUsers = rooms.get(roomId);
+    
+    // Проверяем, занято ли имя пользователя
+    if (Array.from(roomUsers.values()).includes(username)) {
       return socket.emit('error', 'Username is already taken');
     }
 
+    // Сохраняем пользователя
+    roomUsers.set(socket.id, username);
     socket.username = username;
     socket.roomId = roomId;
     socket.join(roomId);
-    rooms.get(roomId).add(username);
 
-    // Отправляем список существующих пользователей новому участнику
-    const others = Array.from(rooms.get(roomId)).filter(u => u !== username);
-    console.log(`Sending users list to ${username}:`, others);
+    // Отправляем новому пользователю список всех участников
+    const others = Array.from(roomUsers.values()).filter(u => u !== username);
     socket.emit('usersInRoom', others);
 
     // Уведомляем других о новом пользователе
-    console.log(`Notifying room ${roomId} about new user ${username}`);
     socket.to(roomId).emit('userJoined', username);
   });
 
   socket.on('sendSignal', ({ targetUsername, signal }) => {
-    console.log(`Routing signal from ${socket.username} to ${targetUsername}`);
-    const targetSocket = Array.from(io.sockets.sockets.values())
-      .find(s => s.username === targetUsername && s.roomId === socket.roomId);
+    const roomUsers = rooms.get(socket.roomId);
+    if (!roomUsers) return;
+
+    // Находим socket.id целевого пользователя
+    const targetSocketId = Array.from(roomUsers.entries())
+      .find(([id, name]) => name === targetUsername)?.[0];
     
-    if (targetSocket) {
-      targetSocket.emit('receiveSignal', {
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('receiveSignal', {
         senderId: socket.username,
         signal
       });
-    } else {
-      console.log(`Target user ${targetUsername} not found in room ${socket.roomId}`);
     }
   });
 
   socket.on('disconnect', () => {
     if (socket.roomId && socket.username && rooms.has(socket.roomId)) {
-      rooms.get(socket.roomId).delete(socket.username);
-      socket.to(socket.roomId).emit('userLeft', socket.username);
+      const roomUsers = rooms.get(socket.roomId);
+      roomUsers.delete(socket.id);
+      
+      // Если комната пуста - удаляем ее
+      if (roomUsers.size === 0) {
+        rooms.delete(socket.roomId);
+      } else {
+        // Уведомляем остальных о выходе пользователя
+        socket.to(socket.roomId).emit('userLeft', socket.username);
+      }
     }
   });
 });
@@ -80,7 +93,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     rooms: Array.from(rooms.keys()),
-    users: Array.from(rooms.values()).flatMap(set => Array.from(set)) 
+    users: Array.from(rooms.values()).flatMap(usersMap => Array.from(usersMap.values()))
   });
 });
 
