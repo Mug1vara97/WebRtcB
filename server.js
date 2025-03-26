@@ -17,6 +17,12 @@ const io = new Server(server, {
   }
 });
 
+// Middleware для оптимизации
+io.use((socket, next) => {
+  socket.setNoDelay(true); // Отключаем алгоритм Нейгла
+  next();
+});
+
 const rooms = new Map();
 
 io.on('connection', (socket) => {
