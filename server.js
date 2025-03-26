@@ -33,27 +33,23 @@ io.on('connection', (socket) => {
     }
 
     if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Map()); // Теперь храним Map с пользователями и их socket.id
+      rooms.set(roomId, new Map());
     }
 
     const roomUsers = rooms.get(roomId);
     
-    // Проверяем, занято ли имя пользователя
     if (Array.from(roomUsers.values()).includes(username)) {
       return socket.emit('error', 'Username is already taken');
     }
 
-    // Сохраняем пользователя
     roomUsers.set(socket.id, username);
     socket.username = username;
     socket.roomId = roomId;
     socket.join(roomId);
 
-    // Отправляем новому пользователю список всех участников
     const others = Array.from(roomUsers.values()).filter(u => u !== username);
     socket.emit('usersInRoom', others);
 
-    // Уведомляем других о новом пользователе
     socket.to(roomId).emit('userJoined', username);
   });
 
@@ -61,7 +57,6 @@ io.on('connection', (socket) => {
     const roomUsers = rooms.get(socket.roomId);
     if (!roomUsers) return;
 
-    // Находим socket.id целевого пользователя
     const targetSocketId = Array.from(roomUsers.entries())
       .find(([id, name]) => name === targetUsername)?.[0];
     
@@ -76,14 +71,13 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (socket.roomId && socket.username && rooms.has(socket.roomId)) {
       const roomUsers = rooms.get(socket.roomId);
+      const username = roomUsers.get(socket.id);
       roomUsers.delete(socket.id);
       
-      // Если комната пуста - удаляем ее
       if (roomUsers.size === 0) {
         rooms.delete(socket.roomId);
-      } else {
-        // Уведомляем остальных о выходе пользователя
-        socket.to(socket.roomId).emit('userLeft', socket.username);
+      } else if (username) {
+        socket.to(socket.roomId).emit('userLeft', username);
       }
     }
   });
