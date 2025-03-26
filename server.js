@@ -14,12 +14,8 @@ const io = new Server(server, {
     origin: "*",
     methods: ["GET", "POST"]
   },
-  pingTimeout: 5000,
-  pingInterval: 10000
-});
-
-io.engine.on("connection", (socket) => {
-  socket.setNoDelay(true);
+  pingTimeout: 10000,
+  pingInterval: 30000
 });
 
 const rooms = new Map();
@@ -28,70 +24,59 @@ io.on('connection', (socket) => {
   console.log(`New connection: ${socket.id}`);
 
   socket.on('joinRoom', ({ roomId, username }) => {
-    if (!username) {
-      return socket.emit('error', 'Username is required');
+    if (!username || !roomId) {
+      return socket.emit('error', 'Username and room ID are required');
     }
 
     if (!rooms.has(roomId)) {
       rooms.set(roomId, new Map());
     }
 
-    const roomUsers = rooms.get(roomId);
+    const room = rooms.get(roomId);
     
-    if (Array.from(roomUsers.values()).includes(username)) {
+    // Проверка уникальности имени в комнате
+    if (Array.from(room.values()).some(user => user.name === username)) {
       return socket.emit('error', 'Username is already taken');
     }
 
-    roomUsers.set(socket.id, username);
-    socket.username = username;
-    socket.roomId = roomId;
+    // Добавляем пользователя в комнату
+    room.set(socket.id, { id: socket.id, name: username });
     socket.join(roomId);
+    socket.roomId = roomId;
 
-    const others = Array.from(roomUsers.values()).filter(u => u !== username);
-    socket.emit('usersInRoom', others);
+    // Отправляем текущий список участников новому пользователю
+    const participants = Array.from(room.values());
+    socket.emit('participants', participants);
 
-    socket.to(roomId).emit('userJoined', username);
+    // Уведомляем остальных о новом участнике
+    socket.to(roomId).emit('newParticipant', { id: socket.id, name: username });
   });
 
-  socket.on('sendSignal', ({ targetUsername, signal }) => {
-    const roomUsers = rooms.get(socket.roomId);
-    if (!roomUsers) return;
-
-    const targetSocketId = Array.from(roomUsers.entries())
-      .find(([id, name]) => name === targetUsername)?.[0];
-    
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('receiveSignal', {
-        senderId: socket.username,
-        signal
-      });
-    }
+  socket.on('signal', ({ targetId, signal }) => {
+    io.to(targetId).emit('signal', { 
+      senderId: socket.id, 
+      signal 
+    });
   });
 
   socket.on('disconnect', () => {
-    if (socket.roomId && socket.username && rooms.has(socket.roomId)) {
-      const roomUsers = rooms.get(socket.roomId);
-      const username = roomUsers.get(socket.id);
-      roomUsers.delete(socket.id);
-      
-      if (roomUsers.size === 0) {
-        rooms.delete(socket.roomId);
-      } else if (username) {
-        socket.to(socket.roomId).emit('userLeft', username);
+    if (socket.roomId && rooms.has(socket.roomId)) {
+      const room = rooms.get(socket.roomId);
+      if (room.has(socket.id)) {
+        room.delete(socket.id);
+        
+        // Удаляем комнату, если она пуста
+        if (room.size === 0) {
+          rooms.delete(socket.roomId);
+        } else {
+          // Уведомляем о выходе участника
+          io.to(socket.roomId).emit('participantLeft', socket.id);
+        }
       }
     }
   });
 });
 
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    rooms: Array.from(rooms.keys()),
-    users: Array.from(rooms.values()).flatMap(usersMap => Array.from(usersMap.values()))
-  });
-});
-
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+server.listen(8080, () => {
+  console.log('Server running on port 8080');
 });
